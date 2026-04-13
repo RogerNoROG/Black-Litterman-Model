@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar
 
 import pandas as pd
+
+from structures import AKSHARE_HTTP_RETRIES, AKSHARE_RETRY_BASE_SEC
+
+T = TypeVar("T")
 
 # 三大指数列名（与 black_litterman 中 INDEX_NUMBER 0/1/2 对应）
 INDEX_SINA: List[Tuple[str, str]] = [
@@ -35,6 +39,33 @@ def _pause() -> None:
     time.sleep(_FETCH_PAUSE_SEC)
 
 
+def _retry_network(fn: Callable[[], T], *, desc: str) -> T:
+    """应对 RemoteDisconnected / ConnectionError 等瞬时网络错误。"""
+    import requests
+
+    retriable = (
+        requests.exceptions.RequestException,
+        ConnectionError,
+        OSError,
+        TimeoutError,
+    )
+    last_err: BaseException | None = None
+    for attempt in range(AKSHARE_HTTP_RETRIES):
+        try:
+            return fn()
+        except retriable as e:
+            last_err = e
+            if attempt >= AKSHARE_HTTP_RETRIES - 1:
+                raise RuntimeError(
+                    f"AkShare 请求失败（{desc}），已重试 {AKSHARE_HTTP_RETRIES} 次。"
+                    " 可检查网络/代理；若配置了 DATA_SOURCE_FALLBACK，将自动尝试备用数据源。"
+                ) from e
+            delay = AKSHARE_RETRY_BASE_SEC * (2**attempt)
+            time.sleep(delay)
+    assert last_err is not None
+    raise RuntimeError("unreachable") from last_err
+
+
 def _import_akshare():
     try:
         import akshare as ak  # type: ignore
@@ -46,11 +77,13 @@ def _import_akshare():
 
 
 def _daily_index_close_cn(ak, sina_symbol: str) -> pd.Series:
-    df = ak.stock_zh_index_daily(symbol=sina_symbol)
-    df = df.copy()
-    df["date"] = pd.to_datetime(df["date"])
-    s = df.set_index("date")["close"].sort_index().astype("float64")
-    return s
+    def _call():
+        df = ak.stock_zh_index_daily(symbol=sina_symbol)
+        df = df.copy()
+        df["date"] = pd.to_datetime(df["date"])
+        return df.set_index("date")["close"].sort_index().astype("float64")
+
+    return _retry_network(_call, desc=f"指数 {sina_symbol}")
 
 
 def _daily_stock_close_cn(
@@ -58,13 +91,16 @@ def _daily_stock_close_cn(
 ) -> pd.Series:
     sd = (start_d - pd.Timedelta(days=420)).strftime("%Y%m%d")
     ed = end_d.strftime("%Y%m%d")
-    df = ak.stock_zh_a_hist(
-        symbol=symbol, period="daily", start_date=sd, end_date=ed, adjust=adjust
-    )
-    df = df.copy()
-    df["date"] = pd.to_datetime(df["日期"])
-    s = df.set_index("date")["收盘"].sort_index().astype("float64")
-    return s
+
+    def _call():
+        df = ak.stock_zh_a_hist(
+            symbol=symbol, period="daily", start_date=sd, end_date=ed, adjust=adjust
+        )
+        df = df.copy()
+        df["date"] = pd.to_datetime(df["日期"])
+        return df.set_index("date")["收盘"].sort_index().astype("float64")
+
+    return _retry_network(_call, desc=f"A股 {symbol}")
 
 
 def _to_weekly_close(series: pd.Series) -> pd.Series:
@@ -73,7 +109,10 @@ def _to_weekly_close(series: pd.Series) -> pd.Series:
 
 def _fetch_spot_mcap_map_cn(ak) -> Optional[Dict[str, float]]:
     try:
-        spot = ak.stock_zh_a_spot_em()
+        spot = _retry_network(
+            lambda: ak.stock_zh_a_spot_em(),
+            desc="A股现货市值 stock_zh_a_spot_em",
+        )
     except Exception:
         return None
     if spot is None or spot.empty:

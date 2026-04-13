@@ -1,8 +1,14 @@
 """周频回测：BL 权重 × 实现收益累加，并与等权对照绘图。"""
 import os
-import numpy as np
+
 import matplotlib.pyplot as plt
+import numpy as np
+
 from structures import *
+
+# 与运行时的当前工作目录无关，图始终落在本文件所在目录下的 Plot/
+_CODE_DIR = os.path.dirname(os.path.abspath(__file__))
+PLOT_DIR = os.path.join(_CODE_DIR, "Plot")
 
 
 class BackTest:
@@ -40,12 +46,15 @@ class BackTest:
         plt.xlabel(BACK_TEST_X_LABEL)
         plt.ylabel(BACK_TEST_Y_LABEL)
         plt.legend()
-        os.makedirs("./Plot", exist_ok=True)
-        plt.savefig(
-            "./Plot/"
-            + "BL Return Back Test_"
+        os.makedirs(PLOT_DIR, exist_ok=True)
+        fname = (
+            "BL Return Back Test_"
             + str(type_name)
             + "_Year "
-            + BACK_TEST_PERIOD_NAME
+            + str(BACK_TEST_PERIOD_NAME)
             + ".png"
         )
+        out_path = os.path.join(PLOT_DIR, fname)
+        plt.savefig(out_path)
+        plt.close()
+        print(f"图已保存: {out_path}", flush=True)

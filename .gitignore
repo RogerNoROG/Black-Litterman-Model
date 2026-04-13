@@ -1,0 +1,57 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- 虚拟环境 ---
+.venv/
+venv/
+ENV/
+
+# --- 测试 / 类型检查 ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# --- 环境变量（勿提交密钥）---
+.env
+.env.local
+.env.*.local
+
+# --- IDE / 编辑器 ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- 系统 ---
+.DS_Store
+Thumbs.db
+
+# --- 本项目：运行 main.py 生成的图 ---
+code/Plot/*.png
+
+# 若不想把本地 JSON / Excel 数据提交到仓库，取消下面两行注释
+# code/Data/*.json
+# code/Data/*.xlsx

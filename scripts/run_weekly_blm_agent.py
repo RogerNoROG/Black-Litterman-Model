@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 """
-周频自动化 Agent：RSS 爬取 → 按周五周线分桶 → LLM/情感生成观点 (P,Q,Ω)
-→ 传入 ``code.black_litterman.BlackLitterman`` 与行情先验融合 → 输出每周权重。
+周频自动化 Agent：中文新闻（默认 Istero API）或 RSS → 按周五周线分桶 → LLM/情感生成观点 (P,Q,Ω)
+→ 与 ``code.black_litterman.BlackLitterman`` 市值先验融合 → 输出每周权重。
 
 实现逻辑见 ``emotion_bl.weekly_pipeline.run_weekly_pipeline``；本脚本仅解析 CLI 并调用。
 
-依赖：仓库根目录 ``.env``（LLM 时）；行情区间 ``AKSHARE_*`` / JSON 路径须覆盖 ``--year``。
+依赖：默认 API 须在 ``.env`` 配置 ``ISTEREO_API_TOKEN``；LLM 情感时另需大模型密钥；行情区间 ``AKSHARE_*`` / JSON 须覆盖 ``--year``。
 
 示例::
 
-    # 在线拉 AkShare（默认）
+    # 默认：Istero 中文 API + 在线 AkShare 行情
     .venv/bin/python scripts/run_weekly_blm_agent.py --year 2025
+
+    # 改用 Scrapy RSS 采新闻
+    .venv/bin/python scripts/run_weekly_blm_agent.py --year 2025 --news-source rss
 
     # 仅离线 JSON（需先有 code/Data/*.json）
     .venv/bin/python scripts/run_weekly_blm_agent.py --year 2025 --market-source json --skip-crawl
 
-    # 已有新闻 JSONL，跳过爬虫
+    # 已有新闻 JSONL，跳过采集
     .venv/bin/python scripts/run_weekly_blm_agent.py --year 2025 --skip-crawl --jsonl data/news_items.jsonl
 
     # 浏览器全流程（需先 ``python run_api.py``）
@@ -46,7 +49,19 @@ def main() -> None:
         description="爬取新闻 → 按周情感/LLM 观点 → 沪深300前十成分 Black-Litterman 周频权重"
     )
     ap.add_argument("--year", type=int, default=None, help="自然年（默认：structures.BACK_TEST_YEAR）")
-    ap.add_argument("--skip-crawl", action="store_true", help="不运行 Scrapy，直接读 --jsonl")
+    ap.add_argument("--skip-crawl", action="store_true", help="不采集新闻，直接读 --jsonl")
+    ap.add_argument(
+        "--news-source",
+        type=str,
+        choices=("api", "rss"),
+        default="api",
+        help="新闻来源：api=Istero 中文要闻 API（默认）；rss=Scrapy RSS（与 --feeds 等）",
+    )
+    ap.add_argument(
+        "--api-append",
+        action="store_true",
+        help="仅 news-source=api：追加写入 JSONL；默认覆盖为本次拉取结果",
+    )
     ap.add_argument(
         "--market-source",
         type=str,
@@ -100,6 +115,8 @@ def main() -> None:
             truncate_jsonl_before_crawl=args.truncate_jsonl_before_crawl,
             max_weeks=args.max_weeks,
             feed_urls=feeds_arg,
+            news_source=args.news_source,
+            api_append=args.api_append,
         )
     except RuntimeError as e:
         print(str(e), flush=True)

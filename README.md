@@ -15,7 +15,7 @@ MPLBACKEND=Agg ../.venv/bin/python main.py
 
 ### 情绪量化 Agent（原 emotion-quanty-agent 已并入本仓库）
 
-仓库根目录提供 **FastAPI**：新闻 RSS 爬取 → 情感分析 → 生成 Black-Litterman 观点矩阵并与均衡收益融合（实现见 **`emotion_bl/`**，矩阵引擎为 **`emotion_bl/bl/black_litterman.py`** 的 `BlackLittermanEngine`，与周频回测里的 **`code/black_litterman.py`** 类 `BlackLitterman` 为不同入口，互不覆盖）。
+仓库根目录提供 **FastAPI**：默认 **Istero 中文新闻 API**（或 RSS）→ 情感分析 → 生成 Black-Litterman 观点矩阵并与市值先验/均衡收益融合（实现见 **`emotion_bl/`**；周频管线用 **`code/black_litterman.py`** 的 `BlackLitterman`，与 **`emotion_bl/bl/black_litterman.py`** 的 `BlackLittermanEngine` 为不同入口）。
 
 ```bash
 # 仓库根目录；先复制 .env.example 为 .env 并按需填写（尤其 LLM 相关）
@@ -32,7 +32,7 @@ MPLBACKEND=Agg ../.venv/bin/python main.py
 |------|------|
 | **`/`** | 时效性情绪 → 预设观点（流式 NDJSON：`/api/run/stream` 等） |
 | **`/weekly-agent`** | 周频 Agent 结果看板（读 `data/weekly_blm_agent_result.json`，`GET /api/weekly-blm-agent-result`） |
-| **`/pipeline-full`** | 全流程可视化：新闻 → 行情 → 逐周 BL（`POST /api/weekly-pipeline/stream`） |
+| **`/pipeline-full`** | 全流程：默认 **Istero 中文新闻 API** → 周线分桶 → 行情 → 逐周情感视图并入 BL → 落盘并在页内展示权重图（`POST /api/weekly-pipeline/stream`） |
 
 一键打开全流程页（会尝试后台启动 API）：**`./scripts/one_click_weekly_pipeline_web.sh`**。
 
@@ -59,7 +59,7 @@ MPLBACKEND=Agg ../.venv/bin/python main.py
 
 ## 周频情绪 × Black-Litterman（沪深 300 前十 + 周线）
 
-- **CLI**：**`scripts/run_weekly_blm_agent.py`** — RSS（可选）→ `data/news_items.jsonl` → 按 **W-FRI** 分桶 → 情感/观点 `pipeline_analyze` → **`code.black_litterman.BlackLitterman.get_post_weight_with_sentiment_views`** → **`data/weekly_blm_agent_result.json`**。
+- **CLI**：**`scripts/run_weekly_blm_agent.py`** — 默认 **Istero 中文新闻 API**（`--news-source api`，需 **`ISTEREO_API_TOKEN`**）或 **`--news-source rss`**（Scrapy）→ `data/news_items.jsonl` → 按 **W-FRI** 分桶 → 情感/观点 `pipeline_analyze` → 与市值先验融合（**`get_post_weight_with_sentiment_views`**）→ **`data/weekly_blm_agent_result.json`**。
 - **共用逻辑**：**`emotion_bl/weekly_pipeline.py`**（`run_weekly_pipeline`），供 CLI 与 **`POST /api/weekly-pipeline/stream`** 复用。
 - **注意**：新闻 `published` 所在自然年应与 **`--year`** 及行情区间大致一致，否则多数周线桶会「无新闻」；详见管线日志中的桶日期范围提示。
 - 常用参数：`--year`、`--skip-crawl`、`--market-source json|akshare|…`、`--jsonl`、`--out`。

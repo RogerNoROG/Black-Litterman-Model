@@ -2,12 +2,13 @@
 周频 BLM Agent 全流程（可被 CLI 与 FastAPI 流式端点共用）。
 
 阶段索引（与网页流程条一致）：
-0 配置 · 1 RSS 采集 · 2 新闻分桶 · 3 行情数据 · 4 样本协方差/收益 · 5 市值权重
-6 回测窗口 · 7 逐周观点与 BL · 8 落盘
+0 配置 · 1 中文新闻采集（默认 Istero API；可选 Scrapy RSS）· 2 新闻分桶 · 3 行情数据
+· 4 样本协方差/收益 · 5 市值隐含先验权重 · 6 回测窗口 · 7 逐周情感观点并入 BL · 8 落盘
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from collections.abc import Callable
@@ -79,6 +80,8 @@ def run_weekly_pipeline(
     truncate_jsonl_before_crawl: bool = False,
     max_weeks: int = 0,
     feed_urls: list[str] | None = None,
+    news_source: str = "api",
+    api_append: bool = False,
     on_log: Callable[[str], None] | None = None,
     on_step: Callable[[int, str], None] | None = None,
     on_progress: Callable[..., None] | None = None,
@@ -138,18 +141,42 @@ def run_weekly_pipeline(
         tau_bl = float(st.TAU)
         log(f"[配置] 回测年 year={y} · TAU={tau_bl} · BACK_TEST_T={st.BACK_TEST_T}")
 
+        news_mode = (news_source or "api").strip().lower()
         if not skip_crawl:
-            step(1, "Scrapy 采集 RSS → 写入 JSONL")
+            jp.parent.mkdir(parents=True, exist_ok=True)
             if truncate_jsonl_before_crawl and jp.exists():
                 jp.unlink()
                 log(f"已按选项删除旧 JSONL: {jp}")
-            rc, log_tail = run_scrapy_rss(root, feed_urls=feed_urls, capture_log=True)
-            if rc != 0:
-                raise RuntimeError(f"Scrapy 退出码 {rc}\n{log_tail}")
-            log(f"Scrapy 完成，退出码 0。日志尾部:\n{log_tail[-2000:]}" if len(log_tail) > 2000 else f"Scrapy 完成。\n{log_tail}")
+
+            if news_mode == "api":
+                step(1, "Istero API 中文要闻 → 写入 JSONL")
+                from emotion_bl.istero_news import fetch_cctv_china_latest_records
+
+                rows = fetch_cctv_china_latest_records()
+                mode = "a" if api_append else "w"
+                with jp.open(mode, encoding="utf-8", newline="\n") as f:
+                    for row in rows:
+                        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                log(
+                    f"Istero API 写入 {len(rows)} 条 → {jp}（mode={mode}，append={api_append}）"
+                )
+            elif news_mode == "rss":
+                step(1, "Scrapy 采集 RSS → 写入 JSONL")
+                rc, log_tail = run_scrapy_rss(root, feed_urls=feed_urls, capture_log=True)
+                if rc != 0:
+                    raise RuntimeError(f"Scrapy 退出码 {rc}\n{log_tail}")
+                log(
+                    f"Scrapy 完成，退出码 0。日志尾部:\n{log_tail[-2000:]}"
+                    if len(log_tail) > 2000
+                    else f"Scrapy 完成。\n{log_tail}"
+                )
+            else:
+                raise ValueError(
+                    f"未知 news_source={news_source!r}，请使用 api（默认）或 rss"
+                )
         else:
-            step(1, "跳过 RSS 采集（--skip-crawl）")
-            log("未运行爬虫，直接读取已有 JSONL。")
+            step(1, "跳过新闻采集（--skip-crawl，直接读已有 JSONL）")
+            log("未运行 API/RSS，直接读取已有 JSONL。")
 
         step(2, "读取 JSONL，按 W-FRI（周五周线）分桶")
         all_news = read_jsonl(jp)
@@ -307,8 +334,6 @@ def run_weekly_pipeline(
             "year": y,
             "weeks": results,
         }
-        import json
-
         outp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         log(f"已写入: {outp}")
 

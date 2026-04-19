@@ -571,3 +571,10 @@ a.btn {
   background: rgba(52, 211, 153, 0.12);
   color: var(--positive);
 }
+
+.pf-subh {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  color: var(--text);
+}

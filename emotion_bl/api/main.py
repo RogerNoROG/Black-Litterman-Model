@@ -74,10 +74,18 @@ class RunDashboardRequest(BaseModel):
 
 
 class WeeklyPipelineStreamRequest(BaseModel):
-    """周频 BLM：RSS/JSONL → 周线分桶 → 行情 → 逐周情感与 Black-Litterman（与 CLI 等价，NDJSON 流式日志）。"""
+    """周频 BLM：中文新闻（默认 Istero API）→ JSONL → 周线分桶 → 行情 → 逐周情感观点并入 BL（与 CLI 等价，NDJSON）。"""
 
     year: int | None = Field(default=None, description="默认 structures.BACK_TEST_YEAR")
     skip_crawl: bool = False
+    news_source: str = Field(
+        "api",
+        description="新闻采集：api=Istero 央视中文要闻（需 ISTERO_API_TOKEN）；rss=Scrapy RSS",
+    )
+    api_append: bool = Field(
+        False,
+        description="仅 news_source=api 时：True 则追加写入 JSONL；False 则本次覆盖写入",
+    )
     project_root: str = "."
     market_source: str = Field(
         "",
@@ -434,6 +442,8 @@ def _stream_weekly_pipeline(body: WeeklyPipelineStreamRequest):
                 truncate_jsonl_before_crawl=body.truncate_jsonl_before_crawl,
                 max_weeks=body.max_weeks,
                 feed_urls=body.feed_urls,
+                news_source=body.news_source,
+                api_append=body.api_append,
                 on_log=tlog,
                 on_step=tstep,
                 on_progress=tprog,

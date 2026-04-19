@@ -55,6 +55,8 @@ function buildRequestBody() {
     skip_crawl: document.getElementById("pfSkipCrawl").checked,
     truncate_jsonl_before_crawl: document.getElementById("pfTruncate").checked,
     max_weeks: Number(document.getElementById("pfMaxWeeks").value) || 0,
+    news_source: document.getElementById("pfNewsSource").value || "api",
+    api_append: document.getElementById("pfApiAppend").checked,
   };
   const y = document.getElementById("pfYear").value.trim();
   if (y) body.year = Number(y);
@@ -75,6 +77,8 @@ async function runPipelineFull() {
 
   btn.disabled = true;
   doneSec.classList.add("hidden");
+  const pfResult = document.getElementById("pfResultSection");
+  if (pfResult) pfResult.classList.add("hidden");
   status.textContent =
     PF_TIMEOUT_MS > 0
       ? `运行中…（前端最长 ${PF_TIMEOUT_MS / 1000}s；周频+LLM 可能很久）`
@@ -163,9 +167,39 @@ async function runPipelineFull() {
             <p><strong>Universe</strong>：${u.map((t) => `<code>${escapeHtml(t)}</code>`).join(" ")}</p>
             <p><a class="btn secondary" href="${escapeHtml(
               obj.dashboard_url || "/weekly-agent"
-            )}">打开周频看板</a></p>
+            )}">打开周频看板（明细表）</a></p>
           `;
           doneSec.classList.remove("hidden");
+          const pfResult = document.getElementById("pfResultSection");
+          if (pfResult && typeof weeklyResultFetchUrl === "function" && typeof renderWeeklyResultPanels === "function") {
+            pfResult.classList.remove("hidden");
+            const url = weeklyResultFetchUrl(obj.result_relative || "");
+            appendPfLog(`拉取结果图表: GET ${url}`);
+            fetch(url)
+              .then((r) => {
+                if (!r.ok) return r.text().then((t) => {
+                  let d = t;
+                  try {
+                    const j = JSON.parse(t);
+                    d = j.detail || t;
+                  } catch (_) { /* ignore */ }
+                  throw new Error(d || `HTTP ${r.status}`);
+                });
+                return r.json();
+              })
+              .then((data) => {
+                renderWeeklyResultPanels(data, {
+                  metaId: "pfMeta",
+                  newsBarsId: "pfNewsBars",
+                  canvasId: "pfWeightCanvas",
+                  legendId: "pfLegend",
+                });
+                appendPfLog("结果图表已渲染。");
+              })
+              .catch((e) => {
+                appendPfLog("结果图表加载失败: " + (e.message || e));
+              });
+          }
           finished = true;
           break;
         }
@@ -194,3 +228,16 @@ async function runPipelineFull() {
 }
 
 document.getElementById("pfRunBtn").addEventListener("click", runPipelineFull);
+
+(function bindNewsSourceUi() {
+  const sel = document.getElementById("pfNewsSource");
+  const ap = document.getElementById("pfApiAppend");
+  if (!sel || !ap) return;
+  function sync() {
+    const isApi = sel.value === "api";
+    ap.disabled = !isApi;
+    if (!isApi) ap.checked = false;
+  }
+  sel.addEventListener("change", sync);
+  sync();
+})();

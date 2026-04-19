@@ -12,8 +12,9 @@
     <header class="header">
       <h1>数据生成全流程（可视化）</h1>
       <p class="sub">
-        一键触发与 <code>scripts/run_weekly_blm_agent.py</code> 相同的管线：RSS/新闻检索 → 周线分桶 →
-        行情下载与处理 → 逐周情感/LLM 观点 → Black-Litterman 后验权重 → 落盘 JSON。
+        一键触发与 <code>scripts/run_weekly_blm_agent.py</code> 相同的管线：<strong>中文新闻 API</strong>（默认 Istero 央视要闻）或 RSS → 按周五周线分桶 →
+        行情与协方差 → 市值隐含先验 → <strong>每周情感观点以视图 (P,Q,Ω) 并入 Black-Litterman</strong> → 后验权重与落盘 JSON。
+        完成后本页展示<strong>权重曲线与新闻量条形图</strong>（与「周频看板」一致）。
         下方日志为<strong>真实执行过程</strong>的流式输出（NDJSON）。
       </p>
       <div class="header-actions">
@@ -26,13 +27,13 @@
       <h2>阶段总览（随执行高亮）</h2>
       <ol class="flow-steps" id="pfFlowSteps">
         <li class="flow-step" data-step="0"><span class="flow-badge">0</span><div class="flow-body"><h3>配置</h3><p>structures、路径、DATA_SOURCE 覆盖等。</p></div></li>
-        <li class="flow-step" data-step="1"><span class="flow-badge">1</span><div class="flow-body"><h3>新闻采集</h3><p>Scrapy RSS → JSONL（可勾选跳过）。</p></div></li>
+        <li class="flow-step" data-step="1"><span class="flow-badge">1</span><div class="flow-body"><h3>中文新闻采集</h3><p>默认 Istero API → JSONL；可选 Scrapy RSS（可勾选跳过）。</p></div></li>
         <li class="flow-step" data-step="2"><span class="flow-badge">2</span><div class="flow-body"><h3>新闻分桶</h3><p>读取 JSONL，按 W-FRI 周五周线对齐。</p></div></li>
         <li class="flow-step" data-step="3"><span class="flow-badge">3</span><div class="flow-body"><h3>行情数据</h3><p>fetch_price_market_pair：周收盘价与市值表。</p></div></li>
         <li class="flow-step" data-step="4"><span class="flow-badge">4</span><div class="flow-body"><h3>样本统计</h3><p>BlackLitterman.get_cc_return（协方差与收益）。</p></div></li>
-        <li class="flow-step" data-step="5"><span class="flow-badge">5</span><div class="flow-body"><h3>先验权重</h3><p>市值隐含均衡权重 π。</p></div></li>
+        <li class="flow-step" data-step="5"><span class="flow-badge">5</span><div class="flow-body"><h3>先验（市值）</h3><p>市值隐含均衡收益/权重 π，作为 BL 先验。</p></div></li>
         <li class="flow-step" data-step="6"><span class="flow-badge">6</span><div class="flow-body"><h3>回测窗口</h3><p>按自然年解析周线 iloc 范围。</p></div></li>
-        <li class="flow-step" data-step="7"><span class="flow-badge">7</span><div class="flow-body"><h3>逐周拟合</h3><p>pipeline_analyze → 观点 (P,Q,Ω) → 后验权重。</p></div></li>
+        <li class="flow-step" data-step="7"><span class="flow-badge">7</span><div class="flow-body"><h3>逐周 BL</h3><p>情感/LLM → 观点 (P,Q,Ω) 并入模型 → 后验权重。</p></div></li>
         <li class="flow-step" data-step="8"><span class="flow-badge">8</span><div class="flow-body"><h3>落盘</h3><p>写入 weekly_blm_agent_result.json。</p></div></li>
       </ol>
     </section>
@@ -57,12 +58,23 @@
           <input type="number" id="pfMaxWeeks" value="0" min="0" max="500" />
         </label>
       </div>
+      <label class="field">
+        <span>新闻来源（未勾选「跳过采集」时生效）</span>
+        <select id="pfNewsSource">
+          <option value="api" selected>Istero API（中文央视要闻，需 .env 中 ISTERO_API_TOKEN）</option>
+          <option value="rss">Scrapy RSS</option>
+        </select>
+      </label>
+      <label class="field check">
+        <input type="checkbox" id="pfApiAppend" />
+        <span>API 模式：追加写入 JSONL（不覆盖已有行；RSS 模式忽略）</span>
+      </label>
       <label class="field check">
         <input type="checkbox" id="pfSkipCrawl" />
-        <span>跳过 RSS 爬取（直接读已有 JSONL）</span>
+        <span>跳过新闻采集（直接读已有 JSONL）</span>
       </label>
       <label class="field">
-        <span>RSS 地址（不跳过爬取时使用，逗号分隔；空则用爬虫默认）</span>
+        <span>RSS 地址（仅 RSS 模式；逗号分隔；空则用爬虫默认）</span>
         <input type="text" id="pfFeeds" placeholder="https://…" />
       </label>
       <label class="field check">
@@ -85,7 +97,28 @@
       <h2>完成</h2>
       <div class="card" id="pfDoneCard"></div>
     </section>
+
+    <section class="panel hidden" id="pfResultSection">
+      <h2>结果图表（Black-Litterman 后验权重）</h2>
+      <p class="hint">情感观点以视图形式并入模型；纵轴为权重。详见摘要中的先验/视图说明。</p>
+      <section class="panel wa-meta-panel" id="pfMetaSection">
+        <h3 class="pf-subh">运行摘要</h3>
+        <div class="card wa-meta" id="pfMeta"></div>
+      </section>
+      <section class="panel" id="pfNewsSection">
+        <h3 class="pf-subh">每周新闻条数</h3>
+        <div class="card wa-news-chart" id="pfNewsBars"></div>
+      </section>
+      <section class="panel" id="pfChartSection">
+        <h3 class="pf-subh">成分股权重（周频）</h3>
+        <div class="card wa-chart-card">
+          <canvas id="pfWeightCanvas" class="wa-canvas" width="900" height="320"></canvas>
+          <div class="wa-legend" id="pfLegend"></div>
+        </div>
+      </section>
+    </section>
   </div>
+  <script src="/static/weekly-chart-common.js"></script>
   <script src="/static/pipeline-full.js"></script>
 </body>
 </html>

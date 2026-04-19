@@ -1,0 +1,11 @@
+# 中文/华语时效性 RSS 示例（复制 URL 到 scrapy -a feeds= 或 FastAPI feed_urls）
+# 注意：源站可能改版、限流或需科学上网；请遵守 robots 与版权，生产环境请自行验证可用性。
+
+https://feeds.bbci.co.uk/zhongwen/simp/rss.xml
+https://feeds.bbci.co.uk/zhongwen/trad/rss.xml
+https://www.solidot.org/index.rss
+https://www.cnbeta.com.tw/backend.php
+https://36kr.com/feed-newsflash
+https://36kr.com/feed
+https://rsshub.app/caijing/roll
+https://rsshub.app/36kr/newsflashes

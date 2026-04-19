@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="emotion-bl-api-base" content="" />
+  <title>周频 Agent 结果 · Black-Litterman</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="layout wa-layout">
+    <header class="header">
+      <h1>周频 BLM Agent 看板</h1>
+      <p class="sub">
+        展示 <code>scripts/run_weekly_blm_agent.py</code> 写入的 JSON：每周新闻量、后验权重轨迹与明细表。
+        默认从本机 API 读取 <code>data/weekly_blm_agent_result.json</code>；亦可本地上传。
+      </p>
+      <div class="header-actions wa-toolbar">
+        <a class="btn secondary" href="/">← 时效性观点页</a>
+        <a class="btn secondary" href="/pipeline-full">全流程执行</a>
+        <button type="button" id="waReload" class="btn primary">从服务器加载</button>
+        <label class="btn secondary wa-file-btn">
+          上传 JSON
+          <input type="file" id="waFile" accept=".json,application/json" hidden />
+        </label>
+      </div>
+    </header>
+
+    <p id="waStatus" class="status" aria-live="polite"></p>
+
+    <section class="panel wa-meta-panel hidden" id="waMetaSection">
+      <h2>运行摘要</h2>
+      <div class="card wa-meta" id="waMeta"></div>
+    </section>
+
+    <section class="panel hidden" id="waNewsSection">
+      <h2>每周新闻条数</h2>
+      <div class="card wa-news-chart" id="waNewsBars"></div>
+    </section>
+
+    <section class="panel hidden" id="waChartSection">
+      <h2>成分股权重（周频）</h2>
+      <p class="hint">纵轴为权重（0–1）；横轴为时间顺序。悬停图例可弱化其它曲线。</p>
+      <div class="card wa-chart-card">
+        <canvas id="waWeightCanvas" class="wa-canvas" width="900" height="320"></canvas>
+        <div class="wa-legend" id="waLegend"></div>
+      </div>
+    </section>
+
+    <section class="panel hidden" id="waTableSection">
+      <h2>按周明细</h2>
+      <div class="table-wrap card wa-table-wrap">
+        <table class="data-table wa-table" id="waTable">
+          <thead id="waThead"></thead>
+          <tbody id="waTbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script src="/static/weekly-agent.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "crawl": false,
+  "max_articles": 1,
+  "jsonl_path": "data/llm_smoke.jsonl",
+  "tickers": ["TSLA"]
+}

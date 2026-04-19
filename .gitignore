@@ -49,6 +49,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# --- 情绪 Agent API 后台日志（restart_server.sh BACKGROUND=1）---
+api_server.log
+
 # --- 本项目：运行 main.py 生成的图 ---
 code/Plot/*.png
 

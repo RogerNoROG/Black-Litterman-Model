@@ -1,24 +1,47 @@
-"""AkShare：沪深300相关指数 + 前十权重股周频收盘价；市值优先东财现货总市值。"""
+"""AkShare：沪深三大指数（东财指数日线）+ 前十权重股（A 股日线）周频收盘价；市值来自东财现货「总市值」。
+
+本模块接口选型与参数对齐 AKShare 文档（股票数据）：
+- **A 股历史日线**：``AKSHARE_STOCK_HIST_SOURCES`` 为优先级列表；**同一次** ``fetch_bl_tables`` 内
+  首次成功的源会作为**粘性源**优先用于后续股票，该源彻底失败后再按列表重新探测。
+  东财：`ak.stock_zh_a_hist`；腾讯：`ak.stock_zh_a_hist_tx`（``sz``/``sh`` 前缀由本模块补全）。
+  腾讯接口在 AkShare 内部常按**年份**循环请求，终端可能出现 **tqdm 进度条**（非本仓库实现）。
+  参数：`symbol` 为 6 位股票代码；`period='daily'`；`start_date` / `end_date` 为 `YYYYMMDD`；
+  `adjust`：`''` 不复权，`'qfq'` 前复权，`'hfq'` 后复权（与 `structures.AKSHARE_ADJUST` 一致）。
+  文档：https://akshare.akfamily.xyz/data/stock/stock.html （历史行情数据-东财）
+- **沪深京 A 股实时行情（东财）**：`ak.stock_zh_a_spot_em` — 取「总市值」等字段推算股本。
+  文档：同上（实时行情数据-东财 / stock_zh_a_spot_em）
+- **指数日线（东财）**：`ak.stock_zh_index_daily_em` — `symbol` 须带市场前缀：`sh`/`sz`/`csi`/`bj`。
+  文档：东方财富网-股票指数数据（与 stock_zh_a_hist 同属官方维护接口体系）
+
+指数列仍使用新浪风格代码 `sh000300` 等，与 `BlackLitterman.INDEX_NUMBER` 一致；拉取时直接传入东财接口。
+
+说明：新浪 `stock_zh_a_daily` 多次请求易封 IP，故个股历史不走新浪；东财不可用时自动换腾讯接口。
+"""
 
 from __future__ import annotations
 
 import time
-from typing import Callable, Dict, List, Optional, Tuple, TypeVar
+import warnings
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
 
 import pandas as pd
 
-from structures import AKSHARE_HTTP_RETRIES, AKSHARE_RETRY_BASE_SEC
+from structures import (
+    AKSHARE_HTTP_RETRIES,
+    AKSHARE_RETRY_BASE_SEC,
+    AKSHARE_STOCK_HIST_SOURCES,
+)
 
 T = TypeVar("T")
 
-# 三大指数列名（与 black_litterman 中 INDEX_NUMBER 0/1/2 对应）
+# 三大指数：元组 (东财/新浪通用代码, DataFrame 列名)；代码须含 sh/sz 前缀供 stock_zh_index_daily_em 使用
 INDEX_SINA: List[Tuple[str, str]] = [
     ("sh000300", "CSI300.GI"),
     ("sh000001", "SSE.GI"),
     ("sz399001", "SZCI.GI"),
 ]
 
-# 沪深300 权重前列 10 只（代码与列名一致；顺序与 get_views_P_Q_matrix 中 P 的下标绑定）
+# 沪深300 权重前列 10 只（列名与 get_views_P_Q_matrix 下标一致）
 STOCKS: List[Tuple[str, str]] = [
     ("300750", "300750"),  # 宁德时代
     ("600519", "600519"),  # 贵州茅台
@@ -76,31 +99,183 @@ def _import_akshare():
     return ak
 
 
-def _daily_index_close_cn(ak, sina_symbol: str) -> pd.Series:
-    def _call():
-        df = ak.stock_zh_index_daily(symbol=sina_symbol)
-        df = df.copy()
-        df["date"] = pd.to_datetime(df["date"])
-        return df.set_index("date")["close"].sort_index().astype("float64")
+def _series_from_hist_df(df: pd.DataFrame, *, desc: str) -> pd.Series:
+    """东财 K 线 DataFrame → 按日收盘 Series（列名兼容 date/日期）。"""
+    if df is None or df.empty:
+        raise ValueError(f"{desc}: 返回空表")
+    dfc = df.copy()
+    date_col = "date" if "date" in dfc.columns else "日期"
+    close_col = "close" if "close" in dfc.columns else "收盘"
+    if date_col not in dfc.columns or close_col not in dfc.columns:
+        raise ValueError(f"{desc}: 缺少日期/收盘列，实际列={dfc.columns.tolist()}")
+    dfc[date_col] = pd.to_datetime(dfc[date_col])
+    return dfc.set_index(date_col)[close_col].sort_index().astype("float64")
 
-    return _retry_network(_call, desc=f"指数 {sina_symbol}")
 
-
-def _daily_stock_close_cn(
-    ak, symbol: str, adjust: str, start_d: pd.Timestamp, end_d: pd.Timestamp
+def _index_daily_close_em(
+    ak,
+    symbol_market: str,
+    start_d: pd.Timestamp,
+    end_d: pd.Timestamp,
 ) -> pd.Series:
-    sd = (start_d - pd.Timedelta(days=420)).strftime("%Y%m%d")
+    """
+    东方财富指数日线收盘价序列。
+    `symbol_market` 形如 ``sh000300``、``sz399001``（见 ``stock_zh_index_daily_em`` 文档）。
+    东财失败或空表时回退新浪 ``stock_zh_index_daily``（文档提示大量采集易封 IP）。
+    """
+    sd = start_d.strftime("%Y%m%d")
     ed = end_d.strftime("%Y%m%d")
 
-    def _call():
-        df = ak.stock_zh_a_hist(
-            symbol=symbol, period="daily", start_date=sd, end_date=ed, adjust=adjust
+    def _call_em():
+        df = ak.stock_zh_index_daily_em(
+            symbol=symbol_market, start_date=sd, end_date=ed
         )
-        df = df.copy()
-        df["date"] = pd.to_datetime(df["日期"])
-        return df.set_index("date")["收盘"].sort_index().astype("float64")
+        return _series_from_hist_df(df, desc=f"指数(EM) {symbol_market}")
 
-    return _retry_network(_call, desc=f"A股 {symbol}")
+    try:
+        return _retry_network(_call_em, desc=f"指数(EM) {symbol_market}")
+    except (RuntimeError, ValueError, KeyError):
+        pass
+
+    def _call_sina():
+        df = ak.stock_zh_index_daily(symbol=symbol_market)
+        s = _series_from_hist_df(df, desc=f"指数(新浪) {symbol_market}")
+        s.index = pd.to_datetime(s.index)
+        mask = (s.index >= start_d.normalize()) & (s.index <= end_d.normalize())
+        s = s.loc[mask]
+        if s.empty:
+            raise ValueError(f"指数(新浪) {symbol_market} 在区间内无数据")
+        return s
+
+    return _retry_network(_call_sina, desc=f"指数(新浪备用) {symbol_market}")
+
+
+def _qq_tx_symbol_for_a_code(code: str) -> str:
+    """腾讯 ``stock_zh_a_hist_tx`` 要求 ``sz000001`` / ``sh600519`` 形式。"""
+    c = str(code).zfill(6)
+    if c.startswith(("6", "9")):
+        return f"sh{c}"
+    return f"sz{c}"
+
+
+def _canonical_stock_hist_source(name: str) -> Optional[str]:
+    n = (name or "").strip().lower()
+    if n in ("eastmoney", "em", "east"):
+        return "eastmoney"
+    if n in ("tencent", "tx", "qq"):
+        return "tencent"
+    return None
+
+
+def _normalize_stock_hist_sources(
+    raw: Union[str, Sequence[str], None],
+) -> Tuple[str, ...]:
+    """解析 ``AKSHARE_STOCK_HIST_SOURCES``：支持 tuple / list / 逗号分隔字符串。"""
+    default: Tuple[str, ...] = ("eastmoney", "tencent")
+    if raw is None:
+        return default
+    if isinstance(raw, str):
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+    else:
+        parts = [str(p).strip() for p in raw if str(p).strip()]
+    seen: set[str] = set()
+    out: List[str] = []
+    for p in parts:
+        c = _canonical_stock_hist_source(p)
+        if c is None:
+            warnings.warn(
+                f"未知的 A 股日 K 数据源标识 {p!r}，已跳过。"
+                " 有效值：eastmoney / em、tencent / tx / qq。",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return tuple(out) if out else default
+
+
+class _StockHistTaskSession:
+    """
+    单次 ``fetch_bl_tables`` 内的 A 股日 K 拉取：粘性源优先，失效后按 ``AKSHARE_STOCK_HIST_SOURCES`` 重探测。
+    """
+
+    __slots__ = ("_ak", "_adjust", "_sources", "_sticky", "_warned_non_primary", "_sd", "_ed")
+
+    def __init__(self, ak, adjust: str, start_d: pd.Timestamp, end_d: pd.Timestamp) -> None:
+        self._ak = ak
+        self._adjust = adjust if adjust is not None else ""
+        self._sources = _normalize_stock_hist_sources(AKSHARE_STOCK_HIST_SOURCES)
+        self._sticky: Optional[str] = None
+        self._warned_non_primary = False
+        self._sd = (start_d - pd.Timedelta(days=420)).strftime("%Y%m%d")
+        self._ed = end_d.strftime("%Y%m%d")
+
+    def _fetch_one(self, symbol: str, src: str) -> pd.Series:
+        ak = self._ak
+        sd, ed, adj = self._sd, self._ed, self._adjust
+
+        def _call_em() -> pd.Series:
+            df = ak.stock_zh_a_hist(
+                symbol=symbol,
+                period="daily",
+                start_date=sd,
+                end_date=ed,
+                adjust=adj,
+            )
+            return _series_from_hist_df(df, desc=f"A股(stock_zh_a_hist) {symbol}")
+
+        tx_sym = _qq_tx_symbol_for_a_code(symbol)
+
+        def _call_tx() -> pd.Series:
+            df = ak.stock_zh_a_hist_tx(
+                symbol=tx_sym,
+                start_date=sd,
+                end_date=ed,
+                adjust=adj,
+            )
+            return _series_from_hist_df(
+                df, desc=f"A股(stock_zh_a_hist_tx) {tx_sym}"
+            )
+
+        if src == "eastmoney":
+            s = _retry_network(_call_em, desc=f"A股(EM) {symbol}")
+        else:
+            s = _retry_network(_call_tx, desc=f"A股(TX) {symbol}")
+        if s is None or s.empty:
+            raise ValueError("序列为空")
+        return s
+
+    def fetch_daily_close(self, symbol: str) -> pd.Series:
+        preferred = self._sources[0]
+        if self._sticky is not None:
+            try:
+                return self._fetch_one(symbol, self._sticky)
+            except (RuntimeError, ValueError, KeyError):
+                self._sticky = None
+
+        errs: List[str] = []
+        for i, src in enumerate(self._sources):
+            try:
+                s = self._fetch_one(symbol, src)
+                self._sticky = src
+                if src != preferred and not self._warned_non_primary:
+                    warnings.warn(
+                        f"A股日 K：首选源 {preferred} 不可用，本任务内将优先使用 {src}；"
+                        f"若 {src} 再失败将按 {self._sources} 重新探测。",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    self._warned_non_primary = True
+                return s
+            except (RuntimeError, ValueError, KeyError) as e:
+                errs.append(f"{src}: {e}")
+
+        raise RuntimeError(
+            f"A股 {symbol} 日 K 全部数据源失败（已按顺序尝试 {self._sources}）："
+            + " | ".join(errs)
+        ) from None
 
 
 def _to_weekly_close(series: pd.Series) -> pd.Series:
@@ -108,6 +283,7 @@ def _to_weekly_close(series: pd.Series) -> pd.Series:
 
 
 def _fetch_spot_mcap_map_cn(ak) -> Optional[Dict[str, float]]:
+    """东财沪深京 A 股现货；总市值单位：元（文档 stock_zh_a_spot_em）。"""
     try:
         spot = _retry_network(
             lambda: ak.stock_zh_a_spot_em(),
@@ -156,21 +332,28 @@ def fetch_bl_tables(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     拉取并返回 (price_df, market_value_df)，均含 `Date` 列。
+
+    流程摘要
+    --------
+    1. 指数：``stock_zh_index_daily_em(sh/sz...)`` → 日收盘 → ``W-FRI`` 周收盘。
+    2. 个股：东财/腾讯日 K（同一次拉取内**粘性源**优先，该源整段失败后再按列表重探测）→ 周收盘。
+    3. 市值：``stock_zh_a_spot_em`` 的「总市值」÷ 最近一周收盘价得股本，再 × 周线得到市值序列。
     """
     ak = _import_akshare()
     start = pd.Timestamp(start_date)
     end = pd.Timestamp(end_date)
 
     weekly_parts: Dict[str, pd.Series] = {}
-    for sina_sym, col in INDEX_SINA:
-        s = _to_weekly_close(_daily_index_close_cn(ak, sina_sym))
+    for market_sym, col in INDEX_SINA:
+        s = _to_weekly_close(_index_daily_close_em(ak, market_sym, start, end))
         weekly_parts[col] = s
         _pause()
 
     stock_codes = [t[0] for t in STOCKS]
     stock_cols = [t[1] for t in STOCKS]
+    stock_hist_sess = _StockHistTaskSession(ak, adjust, start, end)
     for code, col in STOCKS:
-        s = _to_weekly_close(_daily_stock_close_cn(ak, code, adjust, start, end))
+        s = _to_weekly_close(stock_hist_sess.fetch_daily_close(code))
         weekly_parts[col] = s
         _pause()
 

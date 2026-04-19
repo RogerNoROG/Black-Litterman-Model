@@ -1,8 +1,10 @@
 # 原始数据
+## 默认：AkShare 拉取沪深300指数（CSI300.GI）+ 上证综指、深证成指 + 沪深300 权重前列成分股周频行情/市值；
+## 列顺序与 INDEX_NUMBER、Black-Litterman 观点矩阵下标一致（见 data_akshare.INDEX_SINA / STOCKS）。
 ## 数据源：akshare | json | csv | baostock | tushare（见 data_providers.fetch_price_market_pair）
 DATA_SOURCE = "akshare"
-## 主源异常（超时、断连、缺文件等）时依次尝试；空列表则只使用 DATA_SOURCE，不自动切换
-DATA_SOURCE_FALLBACK = ["baostock", "tushare", "csv", "json"]
+## 主源异常（超时、断连、缺文件等）时依次尝试备用源；空列表则仅使用 DATA_SOURCE（固定 AkShare，失败即报错）
+DATA_SOURCE_FALLBACK = []
 
 ## 周频股价 / 市值（JSON，UTF-8；DATA_SOURCE='json' 时使用）
 PRICE_DATA_PATH = "./Data/price_data.json"
@@ -21,6 +23,11 @@ AKSHARE_SAVE_JSON_AFTER_FETCH = False
 ## 东财/新浪接口易偶发断连：单次请求失败时的重试次数与指数退避（秒）
 AKSHARE_HTTP_RETRIES = 6
 AKSHARE_RETRY_BASE_SEC = 1.0
+## A 股日 K：``AKSHARE_STOCK_HIST_SOURCES`` 为**优先级列表**；同一次 ``fetch_bl_tables`` 内
+## 首次探测到可用源后会**持续优先该源**，该源整段失败后再按列表重新探测下一可用源。
+## 取值：``eastmoney`` / ``em``、``tencent`` / ``tx`` / ``qq``；也可写逗号分隔字符串 ``"eastmoney,tencent"``。
+## 仅影响个股；指数仍用 stock_zh_index_daily_em / 新浪备用。
+AKSHARE_STOCK_HIST_SOURCES = ("eastmoney", "tencent")
 
 ## baostock（DATA_SOURCE='baostock'）：复权 1 不复权 2 前复权 3 后复权；区间与 AkShare 共用下列日期
 BAOSTOCK_ADJUSTFLAG = "2"

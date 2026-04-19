@@ -15,10 +15,13 @@ if __name__ == "__main__":
 
     print("-" * 30, "Black-Litterman", "-" * 30, flush=True)
     print("View type:", VIEW_TYPE_NAME[VIEW_TYPE], flush=True)
-    print(
-        "正在加载行情（主源可能较慢或重试；失败将按 DATA_SOURCE_FALLBACK 切换）…",
-        flush=True,
-    )
+    if DATA_SOURCE_FALLBACK:
+        load_msg = (
+            "正在加载行情（主源可能较慢或重试；失败将按 DATA_SOURCE_FALLBACK 切换）…"
+        )
+    else:
+        load_msg = "正在加载行情（AkShare；未配置备用数据源，失败将直接报错）…"
+    print(load_msg, flush=True)
 
     price_df, mv_df, src_used = fetch_price_market_pair()
     print("Data source:", src_used, end="", flush=True)

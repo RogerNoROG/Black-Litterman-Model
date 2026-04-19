@@ -173,6 +173,45 @@ class BlackLitterman:
             raise ValueError(f"未知 view_type: {view_type}")
         return weight_bl, real_ret
 
+    def get_post_weight_with_sentiment_views(
+        self,
+        start_idx,
+        P,
+        Q,
+        omega,
+    ):
+        """
+        使用情绪/LLM 生成的绝对观点 (P, Q, Omega) 替代 ``get_views_P_Q_matrix``，
+        其余与 ``get_post_weight`` 相同：同一估计窗内的 ``implied_ret``、``mkt_cov``、``lambd``。
+
+        ``omega`` 可为长度 k 的一维对角元，或 k×k 矩阵。
+        若 k==0（无观点），退化为当期市值权重（与 ``view_type==0`` 一致）。
+        """
+        T = self.back_test_T
+        stock_cc_ret = self.stock_cc_ret.iloc[start_idx - T : start_idx]
+        mkt_cov = np.array(stock_cc_ret.cov())
+        mv_i = self.market_value_weight[start_idx - 1]
+        implied_ret, lambd = self.get_implied_excess_equilibrium_return(
+            stock_cc_ret, mv_i
+        )
+        real_ret = np.array(self.stock_cc_ret.iloc[start_idx])
+
+        P = np.asarray(P, dtype=float)
+        Q = np.asarray(Q, dtype=float).reshape(-1)
+        omega = np.asarray(omega, dtype=float)
+        if P.size == 0 or Q.size == 0:
+            return np.array(mv_i), real_ret
+        if omega.ndim == 1:
+            omega_mat = np.diag(omega)
+        else:
+            omega_mat = omega
+
+        posterior_ret = self.get_posterior_combined_return(
+            implied_ret, mkt_cov, P, Q, omega_mat
+        )
+        weight_bl = self.get_weight_bl(posterior_ret, mkt_cov, lambd)
+        return weight_bl, real_ret
+
     def calculate_comparative_return(self, start_idx, end_index):
         stock_names = self.stock_names
         stock_cc_ret = self.stock_cc_ret.iloc[start_idx : end_index + 1]

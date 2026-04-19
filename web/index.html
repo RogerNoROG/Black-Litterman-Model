@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- 若页面不是由本服务 8000 端口提供（例如 Live Server），请填写 API 根地址，如 http://127.0.0.1:8000 -->
+  <meta name="emotion-bl-api-base" content="" />
+  <title>时效性观点 · Black-Litterman 预设</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <header class="header">
+      <h1>时效性情绪 → 预设观点</h1>
+      <p class="sub">基于本轮新闻的情感量化与 Black-Litterman 绝对视图；可信度由批次内 Ω 相对换算。</p>
+      <div class="header-actions">
+        <a class="btn secondary" href="/weekly-agent">周频 Agent 看板</a>
+        <a class="btn secondary" href="/pipeline-full">全流程（周频）</a>
+        <button type="button" id="flowBtn" class="btn secondary" aria-expanded="false">
+          展示全流程：从采集到观点
+        </button>
+      </div>
+    </header>
+
+    <section class="panel flow-panel hidden" id="flowPanel" aria-hidden="true">
+      <h2>流水线说明</h2>
+      <p class="flow-intro">以下为「搜信息 → 出观点」在系统中的真实数据路径。点击「运行分析」时，会按<strong>实际执行进度</strong>依次点亮对应步骤；也可点右侧按钮仅做演示动画。</p>
+      <ol class="flow-steps" id="flowSteps">
+        <li class="flow-step" data-step="0">
+          <span class="flow-badge">1</span>
+          <div class="flow-body">
+            <h3>时效信息采集</h3>
+            <p>Scrapy 抓取 RSS（或扩展搜索 Spider），得到标题、摘要、链接与发布时间。</p>
+            <span class="flow-tag">news_crawler · rss</span>
+          </div>
+        </li>
+        <li class="flow-step" data-step="1">
+          <span class="flow-badge">2</span>
+          <div class="flow-body">
+            <h3>结构化落盘</h3>
+            <p>条目追加写入 JSONL（如 <code>data/news_items.jsonl</code>），供分析管线批量读取。</p>
+            <span class="flow-tag">JsonLinesExportPipeline</span>
+          </div>
+        </li>
+        <li class="flow-step" data-step="2">
+          <span class="flow-badge">3</span>
+          <div class="flow-body">
+            <h3>情感量化</h3>
+            <p>对每条正文调用通义（OpenAI 兼容）或 SnowNLP，输出情绪分数与三分类标签。</p>
+            <span class="flow-tag">emotion_bl.sentiment · llm_backend</span>
+          </div>
+        </li>
+        <li class="flow-step" data-step="3">
+          <span class="flow-badge">4</span>
+          <div class="flow-body">
+            <h3>标的映射与聚合</h3>
+            <p>关键词表将文本关联到 ticker，按标的计算平均情绪并统计支撑新闻条数。</p>
+            <span class="flow-tag">tagging · 关键词表或 LLM 抽取 tickers → 聚合</span>
+          </div>
+        </li>
+        <li class="flow-step" data-step="4">
+          <span class="flow-badge">5</span>
+          <div class="flow-body">
+            <h3>生成 BL 预设观点</h3>
+            <p>将情绪映射为绝对视图超额收益 <strong>Q</strong>，并据规则生成观点不确定性 <strong>Ω</strong>（对角）。</p>
+            <span class="flow-tag">views_from_sentiment → P, Q, Ω</span>
+          </div>
+        </li>
+        <li class="flow-step" data-step="5">
+          <span class="flow-badge">6</span>
+          <div class="flow-body">
+            <h3>Black-Litterman 融合</h3>
+            <p>结合先验均衡收益 <strong>Π</strong> 与协方差 <strong>Σ</strong>（及尺度 <strong>τ</strong>），求解后验期望收益 <strong>μ_BL</strong>。</p>
+            <span class="flow-tag">BlackLittermanEngine.solve</span>
+          </div>
+        </li>
+        <li class="flow-step" data-step="6">
+          <span class="flow-badge">7</span>
+          <div class="flow-body">
+            <h3>前端呈现</h3>
+            <p>时效性文字总结、预设观点表、由 Ω 批次内归一得到的<strong>相对可信度</strong>与近期新闻节选。</p>
+            <span class="flow-tag">dashboard · /api/run · 本页</span>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="panel">
+      <h2>运行参数</h2>
+      <div class="grid">
+        <label class="field">
+          <span>标的（逗号分隔，可空则自动）</span>
+          <input type="text" id="tickers" placeholder="AAPL, TSLA, NVDA" />
+        </label>
+        <label class="field">
+          <span>最多分析条数</span>
+          <input type="number" id="maxArticles" value="40" min="1" max="500" />
+        </label>
+        <label class="field check">
+          <input type="checkbox" id="crawl" />
+          <span>运行前先爬取 RSS</span>
+        </label>
+      </div>
+      <label class="field">
+        <span>RSS 地址（勾选爬取时使用，逗号分隔）</span>
+        <input type="text" id="feeds" placeholder="https://feeds.bbci.co.uk/news/business/rss.xml" />
+      </label>
+      <label class="field">
+        <span>JSONL 路径（可空=服务端默认 data/news_items.jsonl）</span>
+        <input type="text" id="jsonlPath" placeholder="留空使用默认" />
+      </label>
+      <button type="button" id="runBtn" class="btn primary">运行分析</button>
+      <p id="status" class="status" aria-live="polite"></p>
+      <label class="field log-field">
+        <span>运行日志（含每步耗时；整管时限由 .env 的 ANALYSIS_DEADLINE_SEC 控制，0 为不限制）</span>
+        <textarea id="runLog" class="run-log" readonly rows="12" placeholder="点击「运行分析」后在此显示实时日志…"></textarea>
+      </label>
+    </section>
+
+    <section class="panel hidden" id="resultSection">
+      <h2>时效性总结</h2>
+      <div class="summary card" id="summary"></div>
+
+      <h2>预设观点与可信度</h2>
+      <div class="table-wrap card">
+        <table class="data-table" id="viewsTable">
+          <thead>
+            <tr>
+              <th>标的</th>
+              <th>方向</th>
+              <th>情绪均值</th>
+              <th>观点 Q（bps）</th>
+              <th>Ω（不确定性）</th>
+              <th>可信度</th>
+              <th>支撑条数</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p class="hint" id="emptyViews">本轮未形成非零观点。</p>
+      </div>
+
+      <h2>近期条目（节选）</h2>
+      <ul class="article-list card" id="recent"></ul>
+    </section>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

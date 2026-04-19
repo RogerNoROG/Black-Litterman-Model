@@ -1,7 +1,19 @@
-pandas>=1.5
-numpy>=1.20
+# --- Black-Litterman 回测（code/）---
+pandas>=2.0
+numpy>=1.24
 matplotlib>=3.5
 openpyxl>=3.0
 akshare>=1.12
 baostock>=0.8.8
 tushare>=1.2.89
+
+# --- 情绪量化 Agent（FastAPI + 爬虫 + 情感 / BL 观点）---
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+scrapy>=2.11.0
+httpx>=0.26.0
+feedparser>=6.0.10
+scipy>=1.11.0
+snownlp>=0.12.3

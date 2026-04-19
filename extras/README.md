@@ -9,5 +9,6 @@
 | `legacy_data/us_json_samples/` | 历史美股样本 JSON（若曾放入版本库） |
 | `report/Black-Litterman-Model.png` | 原项目结构示意图 |
 | `plot_samples/` | 历史回测生成的 PNG 示例（运行 `main.py` 会在 `code/Plot/` 重新生成） |
+| `llm_blm/` | 与上游 [youngandbin/LLM-BLM](https://github.com/youngandbin/LLM-BLM) 对齐的桥接（见 `bridge.py`）；上游代码以 **git submodule** 置于 `third_party/LLM-BLM` |
 
-迁移脚本用法见 `migrate_xlsx_to_json.py` 文件头注释。
+迁移脚本用法见 `migrate_xlsx_to_json.py` 文件头注释。拉取子模块：`git submodule update --init --recursive`。

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="emotion-bl-api-base" content="" />
+  <title>全流程 · 周频 BLM Agent</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="layout wa-layout">
+    <header class="header">
+      <h1>数据生成全流程（可视化）</h1>
+      <p class="sub">
+        一键触发与 <code>scripts/run_weekly_blm_agent.py</code> 相同的管线：RSS/新闻检索 → 周线分桶 →
+        行情下载与处理 → 逐周情感/LLM 观点 → Black-Litterman 后验权重 → 落盘 JSON。
+        下方日志为<strong>真实执行过程</strong>的流式输出（NDJSON）。
+      </p>
+      <div class="header-actions">
+        <a class="btn secondary" href="/">时效性观点页</a>
+        <a class="btn secondary" href="/weekly-agent">周频结果看板</a>
+      </div>
+    </header>
+
+    <section class="panel flow-panel" id="pfFlowPanel" aria-hidden="false">
+      <h2>阶段总览（随执行高亮）</h2>
+      <ol class="flow-steps" id="pfFlowSteps">
+        <li class="flow-step" data-step="0"><span class="flow-badge">0</span><div class="flow-body"><h3>配置</h3><p>structures、路径、DATA_SOURCE 覆盖等。</p></div></li>
+        <li class="flow-step" data-step="1"><span class="flow-badge">1</span><div class="flow-body"><h3>新闻采集</h3><p>Scrapy RSS → JSONL（可勾选跳过）。</p></div></li>
+        <li class="flow-step" data-step="2"><span class="flow-badge">2</span><div class="flow-body"><h3>新闻分桶</h3><p>读取 JSONL，按 W-FRI 周五周线对齐。</p></div></li>
+        <li class="flow-step" data-step="3"><span class="flow-badge">3</span><div class="flow-body"><h3>行情数据</h3><p>fetch_price_market_pair：周收盘价与市值表。</p></div></li>
+        <li class="flow-step" data-step="4"><span class="flow-badge">4</span><div class="flow-body"><h3>样本统计</h3><p>BlackLitterman.get_cc_return（协方差与收益）。</p></div></li>
+        <li class="flow-step" data-step="5"><span class="flow-badge">5</span><div class="flow-body"><h3>先验权重</h3><p>市值隐含均衡权重 π。</p></div></li>
+        <li class="flow-step" data-step="6"><span class="flow-badge">6</span><div class="flow-body"><h3>回测窗口</h3><p>按自然年解析周线 iloc 范围。</p></div></li>
+        <li class="flow-step" data-step="7"><span class="flow-badge">7</span><div class="flow-body"><h3>逐周拟合</h3><p>pipeline_analyze → 观点 (P,Q,Ω) → 后验权重。</p></div></li>
+        <li class="flow-step" data-step="8"><span class="flow-badge">8</span><div class="flow-body"><h3>落盘</h3><p>写入 weekly_blm_agent_result.json。</p></div></li>
+      </ol>
+    </section>
+
+    <section class="panel">
+      <h2>运行参数</h2>
+      <div class="grid">
+        <label class="field">
+          <span>项目根 project_root（相对当前工作目录或绝对路径）</span>
+          <input type="text" id="pfRoot" value="." />
+        </label>
+        <label class="field">
+          <span>回测年 year（留空则用 structures.BACK_TEST_YEAR）</span>
+          <input type="number" id="pfYear" placeholder="如 2025" min="1990" max="2100" />
+        </label>
+        <label class="field">
+          <span>覆盖 DATA_SOURCE（空=不覆盖；离线可填 json）</span>
+          <input type="text" id="pfMarket" placeholder="akshare / json / csv …" />
+        </label>
+        <label class="field">
+          <span>仅跑前 N 周（0=全年）</span>
+          <input type="number" id="pfMaxWeeks" value="0" min="0" max="500" />
+        </label>
+      </div>
+      <label class="field check">
+        <input type="checkbox" id="pfSkipCrawl" />
+        <span>跳过 RSS 爬取（直接读已有 JSONL）</span>
+      </label>
+      <label class="field">
+        <span>RSS 地址（不跳过爬取时使用，逗号分隔；空则用爬虫默认）</span>
+        <input type="text" id="pfFeeds" placeholder="https://…" />
+      </label>
+      <label class="field check">
+        <input type="checkbox" id="pfTruncate" />
+        <span>爬取前清空默认 JSONL（危险，仅调试）</span>
+      </label>
+      <button type="button" id="pfRunBtn" class="btn primary">一键运行全流程</button>
+      <p id="pfStatus" class="status" aria-live="polite"></p>
+    </section>
+
+    <section class="panel">
+      <h2>详细日志</h2>
+      <label class="field log-field">
+        <span>流式输出（含子管线 pipeline_analyze 与 LLM 进度）</span>
+        <textarea id="pfLog" class="run-log" readonly rows="22" placeholder="点击「一键运行全流程」后显示…"></textarea>
+      </label>
+    </section>
+
+    <section class="panel hidden" id="pfDoneSection">
+      <h2>完成</h2>
+      <div class="card" id="pfDoneCard"></div>
+    </section>
+  </div>
+  <script src="/static/pipeline-full.js"></script>
+</body>
+</html>

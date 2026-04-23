@@ -1,6 +1,11 @@
 # --- Black-Litterman 回测（code/）---
 pandas>=2.0
 numpy>=1.24
+scikit-learn>=1.3.0
+# FinBERT 中文情绪（HuggingFace yiyanghkust/finbert-tone-chinese；首次运行需联网下载）
+torch>=2.0.0
+transformers>=4.35.0
+safetensors>=0.4.0
 matplotlib>=3.5
 openpyxl>=3.0
 akshare>=1.12

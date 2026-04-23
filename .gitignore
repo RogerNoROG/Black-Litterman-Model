@@ -58,3 +58,5 @@ code/Plot/*.png
 # 若不想把本地 JSON / Excel 数据提交到仓库，取消下面两行注释
 # code/Data/*.json
 # code/Data/*.xlsx
+1623-0000001.zip
+news-data/
